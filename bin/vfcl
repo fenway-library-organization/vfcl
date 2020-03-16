@@ -1,0 +1,29 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use FindBin;
+
+my $lib;
+
+eval q{
+BEGIN {
+    ($lib) = (grep { -d } glob(map { "$FindBin::Bin/../$_" } qw(lib/perl5 lib/perl lib)));
+}
+use lib $lib;
+use App::Vfcl;
+};
+
+(my $prog = $0) =~ s{.*/}{};
+
+my $root = $ENV{'VFOP_ROOT'} || '/usr/local/vufind';
+my $solr_root = $ENV{'VFOP_SOLR_ROOT'} || '/var/local/solr';
+
+my $app = App::Vfcl->new(
+    'root' => $root,
+    'solr_root' => $solr_root,
+);
+$app->run;
+
+# vim:set et ts=4 sw=4 ai cin:
