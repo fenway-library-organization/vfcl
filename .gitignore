@@ -1,0 +1,12 @@
+*.old
+*.bak
+/blib
+/Build
+/META.yml
+/META.json
+/MYMETA.yml
+/MYMETA.json
+/Makefile.PL
+/Makefile
+/MANIFEST
+/vfcl-*.tar.gz
