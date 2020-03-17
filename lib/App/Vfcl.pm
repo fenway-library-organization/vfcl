@@ -17,6 +17,10 @@ use Getopt::Long
 sub usage;
 sub fatal;
 
+use vars qw($VERSION);
+
+$VERSION = '0.01';
+
 my $ua = LWP::UserAgent->new;
 my $json = JSON->new;
 my $tmpcounter = 0;
