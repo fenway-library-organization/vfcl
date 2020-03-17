@@ -27,10 +27,17 @@ my $tmpcounter = 0;
 my $curi;  # Current VuFind instance ID
 my ($verbose, $dryrun);
 
-if (!caller) {
+# --- Methods
+
+sub new {
+    my $cls = shift;
+    bless { @_ }, $cls;
+}
+
+sub run {
     usage if !@ARGV;
     my $cmd = shift @ARGV;
-    &{ __PACKAGE__->can('cmd_'.$cmd) || usage };
+    goto &{ __PACKAGE__->can('cmd_'.$cmd) || usage };
 }
 
 # --- Command handlers
