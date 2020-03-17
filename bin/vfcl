@@ -5,15 +5,12 @@ use warnings;
 
 use FindBin;
 
-my $lib;
+use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib/perl5";
+use lib "$FindBin::Bin/../lib/perl";
+use lib "$FindBin::Bin/../perl5lib";
 
-eval q{
-BEGIN {
-    ($lib) = (grep { -d } glob(map { "$FindBin::Bin/../$_" } qw(lib/perl5 lib/perl lib)));
-}
-use lib $lib;
 use App::Vfcl;
-};
 
 (my $prog = $0) =~ s{.*/}{};
 
