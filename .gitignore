@@ -1,5 +1,6 @@
 *.old
 *.bak
+/_build
 /blib
 /Build
 /META.yml
