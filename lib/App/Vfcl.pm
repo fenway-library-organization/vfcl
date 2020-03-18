@@ -106,14 +106,14 @@ sub cmd_new {
             chomp $descrip;
         }
     }
-    my $instance = App::Vfcl::Instance->create(
+    App::Vfcl::Instance->create(
         'id' => $i,
         'app' => $self,
         'description' => $descrip,
         'source' => \%source,
         'solr' => \%solr,
     );
-    my $prog = $0;
+    my $prog = $self->program_name;
     print STDERR qq{instance $i created -- use "$prog build" to make it work\n};
 }
 
@@ -121,10 +121,9 @@ sub cmd_status {
     #@ status [INSTANCE...]
     my ($self) = @_;
     $self->orient('nix' => 1);
-    @ARGV = $self->all_instances() if !@ARGV;
+    @ARGV = $self->all_instances if !@ARGV;
     foreach my $i (@ARGV) {
-        my $instance = $self->instance($i);
-        $self->show_status($instance);
+        $self->show_status($self->instance($i));
     }
 }
 
@@ -147,7 +146,7 @@ sub cmd_cache {
 
 sub cmd_cache_empty {
     my ($self) = @_;
-    my $instance = $self->orient();
+    my $instance = $self->orient;
     my @dirs = grep { -d $_ } glob("$instance->{'_directory'}/vufind/local/cache/*");
     system('rm', '-Rf', @dirs);
 }
@@ -159,28 +158,28 @@ sub cmd_solr {
 
 sub cmd_solr_start {
     my ($self) = @_;
-    my $instance = $self->orient();
+    my $instance = $self->orient;
     $self->usage if @ARGV;
     $self->solr_action($instance, 'start');
 }
 
 sub cmd_solr_stop {
     my ($self) = @_;
-    my $instance = $self->orient();
+    my $instance = $self->orient;
     $self->usage if @ARGV;
     $self->solr_action($instance, 'stop');
 }
 
 sub cmd_solr_restart {
     my ($self) = @_;
-    my $instance = $self->orient();
+    my $instance = $self->orient;
     $self->usage if @ARGV;
     $self->solr_action($instance, 'restart');
 }
 
 sub cmd_solr_status {
     my ($self) = @_;
-    my $instance = $self->orient();
+    my $instance = $self->orient;
     $self->usage if @ARGV;
     my $solr = $self->solr($instance);
     my $status = $self->solr_status($solr);
