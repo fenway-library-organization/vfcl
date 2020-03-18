@@ -1,15 +1,6 @@
 package App::Vfcl::Util;
 
-sub gimme {
-    no strict 'refs';
-    my $pkg = shift;
-    my $callpkg = caller(0);
-    my @all = qw(download untar checkout);
-    my @subs = @_ ? @_ : @all;
-    foreach my $sub (@subs) {
-        *{$callpkg.'::'.$sub} = \&{$pkg.'::'.$sub};
-    }
-}
+# Utility routines
 
 sub download {
     my ($ua, $uri, $file) = @_;
