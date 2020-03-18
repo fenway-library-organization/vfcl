@@ -26,8 +26,10 @@ $VERSION = '0.01';
 sub new {
     my $cls = shift;
     my $self = bless {
+        'program_name' => basename($0),
         'root' => $ENV{'VFCL_ROOT'} || '/usr/local/vufind',
         'solr_root' => $ENV{'VFCL_SOLR_ROOT'} || '/var/local/solr',
+        'counter' => 0,
         @_,
     }, $cls;
     $self->init;
@@ -38,9 +40,6 @@ sub init {
     my ($self) = @_;
     $self->{'ua'} ||= LWP::UserAgent->new;
     $self->{'json'} ||= JSON->new;
-    $self->{'counter'} = 0;
-    $self->{'current_instance'} = undef;  # Current VuFind instance
-    $self->{'verbose'} = $self->{'dryrun'} = undef;
 }
 
 sub root { @_ > 1 ? $_[0]{'root'} = $_[1] : $_[0]{'root'} }
