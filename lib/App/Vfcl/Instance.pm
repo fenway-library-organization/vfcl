@@ -2,6 +2,8 @@ package App::Vfcl::Instance;
 
 use base qw(App::Vfcl::Object);
 
+use App::Vfcl::Util;
+
 App::Vfcl::Util->gimme;
 
 sub id { @_ > 1 ? $_[0]{'id'} = $_[1] : $_[0]{'id'} }

@@ -3,6 +3,7 @@ package App::Vfcl;
 use strict;
 use warnings;
 
+use App::Vfcl::Instance;
 use JSON;
 use MARC::Loop;
 use LWP::UserAgent;
