@@ -1,5 +1,8 @@
 package App::Vfcl;
 
+use strict;
+use warnings;
+
 use JSON;
 use MARC::Loop;
 use LWP::UserAgent;
@@ -14,39 +17,63 @@ use Try::Tiny;
 use Getopt::Long
     qw(:config posix_default gnu_compat require_order bundling no_ignore_case);
 
-sub usage;
-sub fatal;
-
 use vars qw($VERSION);
 
 $VERSION = '0.01';
-
-my $ua = LWP::UserAgent->new;
-my $json = JSON->new;
-my $tmpcounter = 0;
-my $curi;  # Current VuFind instance ID
-my ($verbose, $dryrun);
 
 # --- Methods
 
 sub new {
     my $cls = shift;
-    bless { @_ }, $cls;
+    my $self = bless {
+        'root' => $ENV{'VFCL_ROOT'} || '/usr/local/vufind',
+        'solr_root' => $ENV{'VFCL_SOLR_ROOT'} || '/var/local/solr',
+        @_,
+    }, $cls;
+    $self->init;
+    return $self;
+}
+
+sub init {
+    my ($self) = @_;
+    $self->{'ua'} ||= LWP::UserAgent->new;
+    $self->{'json'} ||= JSON->new;
+    $self->{'counter'} = 0;
+    $self->{'current_instance'} = undef;  # Current VuFind instance
+    $self->{'verbose'} = $self->{'dryrun'} = undef;
+}
+
+sub root { @_ > 1 ? $_[0]{'root'} = $_[1] : $_[0]{'root'} }
+sub solr_root { @_ > 1 ? $_[0]{'solr_root'} = $_[1] : $_[0]{'solr_root'} }
+sub ua { @_ > 1 ? $_[0]{'ua'} = $_[1] : $_[0]{'ua'} }
+sub json { @_ > 1 ? $_[0]{'json'} = $_[1] : $_[0]{'json'} }
+sub verbose { @_ > 1 ? $_[0]{'verbose'} = $_[1] : $_[0]{'verbose'} }
+sub dryrun { @_ > 1 ? $_[0]{'dryrun'} = $_[1] : $_[0]{'dryrun'} }
+
+sub current_instance { @_ > 1 ? $_[0]{'current_instance'} = $_[1] : $_[0]{'current_instance'} }
+sub program_name { @_ > 1 ? $_[0]{'program_name'} = $_[1] : $_[0]{'program_name'} }
+
+sub counter {
+    return ++$_[0]{'counter'} if @_ == 1;
+    return $_[0]{'counter'} = $_[1];
 }
 
 sub run {
-    usage if !@ARGV;
+    my ($self) = @_;
+    $self->usage if !@ARGV;
     my $cmd = shift @ARGV;
-    goto &{ __PACKAGE__->can('cmd_'.$cmd) || usage };
+    goto &{ $self->can('cmd_'.$cmd) || $self->usage };
 }
 
 # --- Command handlers
 
 sub cmd_new {
     #@ new [-s SOLRHOST:SOLRPORT] INSTANCE
+    my ($self) = @_;
     my $solr = 'localhost:8080';
     my ($descrip, %source);
-    orient(
+    my $root = $self->root;
+    $self->orient(
         'nix' => 1,  # Don't try to get an instance
         's|solr=s' => \$solr,
         'm|description=s' => \$descrip,
@@ -62,94 +89,101 @@ sub cmd_new {
             $source{'branch'} = $_[1];
         },
     );
-    usage if @ARGV != 1;
+    $self->usage if @ARGV != 1;
     my ($i) = @ARGV;
-    fatal "root doesn't exist: $root"
+    $self->fatal("root doesn't exist: $root")
         if !-d $root;
-    fatal "instance already exists: $i"
+    $self->fatal("instance already exists: $i")
         if -e "$root/instance/$i/instance.kv";
     $solr =~ /^(\[[^\[\]]+\]|[^:]+):([0-9]+)$/
-        or usage;
+        or $self->usage;
     my %solr = ('host' => $1, 'port' => $2);
     if (!defined $descrip) {
         if (-t STDIN && -t STDERR) {
             print STDERR "Instance description: ";
             $descrip = <STDIN>;
-            fatal "cancelled" if !defined $descrip;
+            $self->fatal("cancelled") if !defined $descrip;
             chomp $descrip;
         }
     }
     my $instance = App::Vfcl::Instance->create(
         'id' => $i,
+        'app' => $self,
         'description' => $descrip,
         'source' => \%source,
         'solr' => \%solr,
     );
+    my $prog = $0;
     print STDERR qq{instance $i created -- use "$prog build" to make it work\n};
 }
 
 sub cmd_status {
     #@ status [INSTANCE...]
-    orient('nix' => 1);
-    @ARGV = all_instances() if !@ARGV;
+    my ($self) = @_;
+    $self->orient('nix' => 1);
+    @ARGV = $self->all_instances() if !@ARGV;
     foreach my $i (@ARGV) {
-        my $instance = instance($i);
-        show_status($instance);
+        my $instance = $self->instance($i);
+        $self->show_status($instance);
     }
 }
 
 sub cmd_build {
     #@ build INSTANCE
-    my $instance = orient(
-        'n|dry-run' => \$dryrun,
-        'v|verbose' => \$verbose,
-    );
-    $verbose = 1 if $dryrun;
+    my ($self) = @_;
+    my $instance = $self->orient;
     try {
         $instance->build;
     }
     catch {
-        fatal(split /\n/, $@, 1);
+        $self->fatal(split /\n/, $@, 1);
     }
 }
 
 sub cmd_cache {
-    subcmd();
+    my ($self) = @_;
+    subcmd($self);
 }
 
 sub cmd_cache_empty {
-    my $instance = orient();
+    my ($self) = @_;
+    my $instance = $self->orient();
     my @dirs = grep { -d $_ } glob("$instance->{'_directory'}/vufind/local/cache/*");
     system('rm', '-Rf', @dirs);
 }
 
 sub cmd_solr {
-    subcmd();
+    my ($self) = @_;
+    subcmd($self);
 }
 
 sub cmd_solr_start {
-    my $instance = orient();
-    usage if @ARGV;
-    solr_action($instance, 'start');
+    my ($self) = @_;
+    my $instance = $self->orient();
+    $self->usage if @ARGV;
+    $self->solr_action($instance, 'start');
 }
 
 sub cmd_solr_stop {
-    my $instance = orient();
-    usage if @ARGV;
-    solr_action($instance, 'stop');
+    my ($self) = @_;
+    my $instance = $self->orient();
+    $self->usage if @ARGV;
+    $self->solr_action($instance, 'stop');
 }
 
 sub cmd_solr_restart {
-    my $instance = orient();
-    usage if @ARGV;
-    solr_action($instance, 'restart');
+    my ($self) = @_;
+    my $instance = $self->orient();
+    $self->usage if @ARGV;
+    $self->solr_action($instance, 'restart');
 }
 
 sub cmd_solr_status {
-    my $instance = orient();
-    usage if @ARGV;
-    my $solr = solr($instance);
-    my $status = solr_status($solr);
+    my ($self) = @_;
+    my $instance = $self->orient();
+    $self->usage if @ARGV;
+    my $solr = $self->solr($instance);
+    my $status = $self->solr_status($solr);
     if (!$status) {
         print STDERR "solr instance is not running: $solr->{'uri'}\n";
         exit 2;
@@ -165,28 +199,26 @@ sub cmd_solr_status {
 
 sub cmd_import {
     #@ import FILE...
-    my $instance = orient(
-        'n|dry-run' => \$dryrun,
-        'v|verbose' => \$verbose,
-    );
-    usage if !@ARGV;
-    my $solr = solr($instance);
+    my ($self) = @_;
+    my $instance = $self->orient;
+    $self->usage if !@ARGV;
+    my $solr = $self->solr($instance);
     @ARGV = map {
-        my $path = canonpath($_);
-        fatal "no such file: $_" if !defined $path;
+        my $path = _canonpath($_);
+        $self->fatal("no such file: $_") if !defined $path;
         $path
     } @ARGV;
-    $verbose = 1, print STDERR "Dry run -- no changes will be made\n" if $dryrun;
+    print STDERR "Dry run -- no changes will be made\n" if $self->dryrun;
     print STDERR "Checking MARC records...\n";
     my %invalid;
     my %name;
     foreach my $f (@ARGV) {
-        print STDERR $f, "\n" if $verbose;
-        fatal "not a MARC file: $f" if $f !~ m{([^/]+\.mrc)(?:\.gz)?$};
+        print STDERR $f, "\n" if $self->verbose;
+        $self->fatal("not a MARC file: $f") if $f !~ m{([^/]+\.mrc)(?:\.gz)?$};
         my $name = $1;
-        fatal "duplicate file name: $name" if exists $name{$name};
+        $self->fatal("duplicate file name: $name") if exists $name{$name};
         $name{$f} = $name;
-        my $fh = oread($f);
+        my $fh = $self->oread($f);
         my %num;
         while (1) {
             my $marc;
@@ -216,63 +248,65 @@ sub cmd_import {
             print STDERR "  ERR $f\n";
         }
         else {
-            print STDERR "  OK  $f\n" if $verbose;
+            print STDERR "  OK  $f\n" if $self->verbose;
         }
     }
     exit 1 if keys %invalid;
-    xchdir($root, 'instance', $instance->{'id'});
-    my $solr_dir = canonpath($solr->{'local'});
-    fatal "solr instance doesn't exist locally"
+    my $root = $self->root;
+    $self->xchdir($root, 'instance', $instance->{'id'});
+    my $solr_dir = _canonpath($solr->{'local'});
+    $self->fatal("solr instance doesn't exist locally")
         if !defined $solr_dir
         || !-d $solr_dir;
     my $solr_dir_here = 'vufind/solr';
-    fatal getcwd, '/solr does not exist'
+    $self->fatal(getcwd, '/solr does not exist')
         if !-e $solr_dir_here;
-    $solr_dir_here = canonpath(readlink($solr_dir_here)) if -l $solr_dir_here;
-    fatal "solr not configured correctly: $solr_dir_here is not the same as $solr_dir"
+    $solr_dir_here = _canonpath(readlink($solr_dir_here)) if -l $solr_dir_here;
+    $self->fatal("solr not configured correctly: $solr_dir_here is not the same as $solr_dir")
         if $solr_dir_here ne $solr_dir;
-    exit 0 if $dryrun;
-    xmkdir('records', 'records/importing', 'records/imported', 'records/failed');
+    exit 0 if $self->dryrun;
+    $self->xmkdir('records', 'records/importing', 'records/imported', 'records/failed');
     my @importing;
     foreach my $f (@ARGV) {
         my $name = $name{$f};
         my $dest = "records/importing";
-        xmove($f, $dest);
+        $self->xmove($f, $dest);
         if ($f =~ /\.gz$/) {
             system('gunzip', "$dest.gz") == 0
-                or fatal "decompression failed: $dest.gz";
+                or $self->fatal("decompression failed: $dest.gz");
         }
-        my $path = canonpath("$dest/$name");
+        my $path = _canonpath("$dest/$name");
         push @importing, $path;
     }
-    xchdir('vufind');
+    $self->xchdir('vufind');
     my $err;
-    withenv(environment($instance), sub {
+    $self->withenv($self->environment($instance), sub {
         $err = system('./import-marc.sh', @importing);
     });
-    xchdir('..');
+    $self->xchdir('..');
     if ($err) {
         print STDERR "import failed\n";
-        xmove(@importing, 'records/failed');
+        $self->xmove(@importing, 'records/failed');
     }
     else {
         print STDERR "import completed\n";
-        xmove(@importing, 'records/imported');
+        $self->xmove(@importing, 'records/imported');
     }
 }
 
 sub cmd_export {
     #@ export [-a] [-k BATCHSIZE] INSTANCE [RECORD...]
+    my ($self) = @_;
     my %form = qw(fl fullrecord start 0 rows 10);
     my $all;
-    my $instance = orient(
+    my $instance = $self->orient(
         'a|all' => \$all,
         'k|batch-size=i' => \$form{'rows'},
     );
     my $total = 0;
     my @queries;
     if ($all) {
-        usage if @ARGV;
+        $self->usage if @ARGV;
         $form{'q'} = 'id:*';
         push @queries, { %form };
     }
@@ -289,9 +323,11 @@ sub cmd_export {
             $form{'start'} += @ids;
         }
     }
-    my $solr = solr($instance);
+    my $solr = $self->solr($instance);
     my $uri = $solr->{'uri'};
     my $bibcore = $solr->{'cores'}{'biblio'};
+    my $ua = $self->ua;
+    my $json = $self->json;
     foreach my $query (@queries) {
         my $remaining;
         my $uri = URI->new("$uri/${bibcore}/select");
@@ -300,7 +336,7 @@ sub cmd_export {
             my $req = HTTP::Request->new('GET' => $uri);
             $req->header('Accept' => 'application/json');
             my $res = $ua->request($req);
-            fatal $res->status_line if !$res->is_success;
+            $self->fatal($res->status_line) if !$res->is_success;
             my $content = $json->decode($res->content);
             if (!defined $remaining) {
                 $remaining = $content->{'response'}{'numFound'};
@@ -319,12 +355,13 @@ sub cmd_export {
 # --- Commands that operate more directly on Solr
 
 sub cmd_empty {
+    my ($self) = @_;
     my $yes;
-    my $instance = orient(
+    my $instance = $self->orient(
         'y|yes' => \$yes,
     );
-    usage if @ARGV;
-    my $solr = solr($instance);
+    $self->usage if @ARGV;
+    my $solr = $self->solr($instance);
     my ($host, $port, $cores) = @$solr{qw(host port cores)};
     my $uri = "http://${host}:${port}/solr/$cores->{'biblio'}/update";
     my $sfx = "?commit=true";
@@ -332,20 +369,22 @@ sub cmd_empty {
     if (!$yes) {
         print STDERR 'Are you sure you want to proceed? [yN] ';
         my $ans = <STDIN>;
-        fatal 'cancelled' if !defined $ans || $ans !~ /^[Yy]/;
+        $self->fatal('cancelled') if !defined $ans || $ans !~ /^[Yy]/;
     }
     my $t0 = time;
     $uri .= $sfx;
     my $req = HTTP::Request->new('POST' => $uri);
     $req->header('Content-Type' => 'text/xml');
     $req->content('<delete><query>*:*</query></delete>');
+    my $ua = $self->ua;
     my $res = $ua->request($req);
-    fatal $res->status_line if !$res->is_success;
+    $self->fatal($res->status_line) if !$res->is_success;
     printf STDERR "Deletion completed in %d second(s)\n", time - $t0;
 }
 
 sub cmd_upgrade {
-    update_ini_file('config/vufind/config.ini', 'System', sub {
+    my ($self) = @_;
+    $self->update_ini_file('config/vufind/config.ini', 'System', sub {
         s/^(\s*autoConfigure\s*)=(\s*)false/$1=$2true/;
     });
 }
@@ -353,18 +392,21 @@ sub cmd_upgrade {
 # --- Other functions
 
 sub subcmd {
-    usage if !@ARGV;
+    my ($self) = @_;
+    $self->usage if !@ARGV;
     my $subcmd = shift @ARGV;
     my @caller = caller 1;
     $caller[3] =~ /(cmd_\w+)$/ or die;
-    goto &{ __PACKAGE__->can($1.'_'.$subcmd) || usage };
+    goto &{ $self->can($1.'_'.$subcmd) || $self->usage };
 }
 
 sub solr_status {
-    my ($solr) = @_;
+    my ($self, $solr) = @_;
     my $uri = "$solr->{'uri'}/admin/cores?action=STATUS";
     my $req = HTTP::Request->new(GET => $uri);
     $req->header('Accept' => 'application/json');
+    my $ua = $self->ua;
+    my $json = $self->json;
     my $res = $ua->request($req)
         or return;
     my %status = (
@@ -383,38 +425,38 @@ sub solr_status {
 }
 
 sub solr_action {
-    my ($instance, $action) = @_;
-    $instance = instance($instance) if !ref $instance;
+    my ($self, $instance, $action) = @_;
+    $instance = $self->instance($instance) if !ref $instance;
     my $i = $instance->{'id'};
     my $idir = $instance->{'_directory'};
-    as_solr_user($instance, sub {
+    $self->as_solr_user($instance, sub {
         system("$idir/vufind/solr.sh", $action) == 0
-            or fatal "exec $idir/solr.sh $action: $?";
+            or $self->fatal("exec $idir/solr.sh $action: $?");
     });
 }
 
 sub as_solr_user {
-    my ($instance, $cmd) = @_;
+    my ($self, $instance, $cmd) = @_;
     my $i = $instance->{'id'};
-    my $solr = solr($instance);
+    my $solr = $self->solr($instance);
     my ($host, $port) = @$solr{qw(host port)};
     my $solr_dir = $solr->{'local'};
-    fatal "solr instance for $i doesn't seem to exist locally"
+    $self->fatal("solr instance for $i doesn't seem to exist locally")
         if !defined $solr_dir || !-d $solr_dir;
     my $solr_user = $solr->{'user'} || 'solr';
     my $user = getpwuid($<);
     if ($user ne $solr_user) {
         my $solr_uid = getpwnam($solr_user);
-        fatal "getpwnam: $!" if !defined $solr_uid;
-        setuid($solr_uid) or fatal "setuid $solr_uid: $!";
+        $self->fatal("getpwnam: $!") if !defined $solr_uid;
+        setuid($solr_uid) or $self->fatal("setuid $solr_uid: $!");
     }
-    withenv(environment($instance), sub { $cmd->($solr) });
+    $self->withenv($self->environment($instance), sub { $cmd->($solr) });
 }
 
 sub environment {
-    my ($instance, $sub) = @_;
+    my ($self, $instance, $sub) = @_;
     my $vdir = $instance->{'_directory'} . '/vufind';
-    my $solr_dir = solr($instance)->{'local'};
+    my $solr_dir = $self->solr($instance)->{'local'};
     my %solr;
     %solr = (
         'SOLR_HOME' => "$solr_dir/vufind",
@@ -430,72 +472,76 @@ sub environment {
 }
 
 sub withenv {
-    my ($env, $sub) = @_;
+    my ($self, $env, $sub) = @_;
     local %ENV = %$env;
     $sub->();
 }
 
 sub oread {
-    my ($file) = @_;
-    open my $fh, '<', $file or fatal "open $file for reading: $!";
+    my ($self, $file) = @_;
+    open my $fh, '<', $file or $self->fatal("open $file for reading: $!");
     return $fh;
 }
 
 sub owrite {
-    my ($file) = @_;
-    open my $fh, '>', $file or fatal "open $file for writing: $!";
+    my ($self, $file) = @_;
+    open my $fh, '>', $file or $self->fatal("open $file for writing: $!");
     return $fh;
 }
 
 sub oreadwrite {
-    my ($file) = @_;
-    open my $fh, '+<', $file or fatal "open $file for reading and writing: $!";
+    my ($self, $file) = @_;
+    open my $fh, '+<', $file or $self->fatal("open $file for reading and writing: $!");
     return $fh;
 }
 
 sub kvmake {
-    my ($hash) = @_;
+    my ($self, $hash) = @_;
     my %kv = map { $_ => $hash->{$_} } grep { !/^_/ } keys %$hash;
     return flatten(\%kv);
 }
 
 sub show_status {
-    my ($instance) = @_;
-    my $solr = solr($instance);
+    my ($self, $instance) = @_;
+    my $solr = $self->solr($instance);
     my $uri = $solr->{'uri'};
     my $req = HTTP::Request->new('GET' => $uri);
+    my $ua = $self->ua;
     my $res = $ua->request($req);
     print $res->status_line, "\n";
 }
 
 sub xmkdir {
+    my $self = shift;
     foreach my $dir (@_) {
-        -d $dir or mkdir $dir or fatal "mkdir $dir: $!";
+        -d $dir or mkdir $dir or $self->fatal("mkdir $dir: $!");
     }
 }
 
 sub xmove {
+    my $self = shift;
     my $d = pop;
     foreach my $s (@_) {
         move($s, $d)
-            or fatal "move $s $d: $!";
+            or $self->fatal("move $s $d: $!");
     }
 }
 
 sub xrename {
-    my ($s, $d) = @_;
-    rename $s, $d or fatal "rename $s to $d: $!";
+    my ($self, $s, $d) = @_;
+    rename $s, $d or $self->fatal("rename $s to $d: $!");
 }
 
 sub xchdir {
+    my $self = shift;
     foreach my $dir (@_) {
-        chdir $dir or fatal "chdir $dir: $!";
+        chdir $dir or $self->fatal("chdir $dir: $!");
     }
 }
 
 sub update_ini_file {
-    my ($file, $section, $sub) = @_;
-    my $fhin = oread($file);
+    my ($self, $file, $section, $sub) = @_;
+    my $fhin = $self->oread($file);
     my @lines = <$fhin>;
     my $n = 0;
     my $insection = '';
@@ -549,56 +595,60 @@ sub update_ini_file {
     }
     if ($n) {
         my $tmpfile = '.~' . $file . '~';
-        my $fhout = owrite($tmpfile);
+        my $fhout = $self->owrite($tmpfile);
         for (@lines) {
             print $fhout $_ if defined $_;
         }
-        close $fhout or fatal "close $tmpfile: $!";
-        replace($file, $tmpfile, $file . '.bak');
+        close $fhout or $self->fatal("close $tmpfile: $!");
+        $self->replace($file, $tmpfile, $file . '.bak');
     }
     return 0;
 }
 
 sub tmpfile {
-    my ($file) = @_;
+    my ($self, $file) = @_;
     my $dir = dirname($file);
     my $base = basename($file);
-    return $dir . '/.~' . ++$tmpcounter . '~' . $base . '~';
+    my $counter = $self->counter;
+    return $dir . '/.~' . $counter . '~' . $base . '~';
 }
 
 sub replace {
     # Replace the contents of $file with the contents of $new -- leaving a copy
     # of the original $file in $backup, if the latter is specified
-    my ($file, $new, $backup) = @_;
+    my ($self, $file, $new, $backup) = @_;
     if (!defined $backup) {
-        my $tmp = tmpfile();
-        rename $file, $tmp or fatal "replace $file: can't move it to make way for new contents";
+        my $tmp = $self->tmpfile;
+        rename $file, $tmp or $self->fatal("replace $file: can't move it to make way for new contents");
         if (rename $new, $file) {
             unlink $tmp;
             return;
         }
-        rename $tmp, $file or fatal "replace $file: can't move it back from $tmp";
+        rename $tmp, $file or $self->fatal("replace $file: can't move it back from $tmp");
     }
     if (-e $backup) {
-        unlink $backup or fatal "unlink $backup"
+        unlink $backup or $self->fatal("unlink $backup")
     }
     if (rename $file, $backup) {
         return if rename $new, $file;
         rename $backup, $file
-            or fatal "replace $file: can't restore from $backup: $!";
+            or $self->fatal("replace $file: can't restore from $backup: $!");
     }
     else {
-        fatal "replace $file: can't rename $file to $backup: $!";
+        $self->fatal("replace $file: can't rename $file to $backup: $!");
     }
 }
 
 sub instance {
-    my ($i) = @_;
+    my ($self, $i) = @_;
     if (!defined $i) {
-        $i = $curi or fatal "no instance specified";
+        $i = $self->current_instance or $self->fatal("no instance specified");
     }
     $i =~ s/^[@]//;
-    my $instance = kvread("$root/instance/$i/instance.kv");
+    my $root = $self->root;
+    my $ua = $self->ua;
+    my $json = $self->json;
+    my $instance = $self->kvread("$root/instance/$i/instance.kv");
     return App::Vfcl::Instance->new(
         'id' => $i,
         %$instance,
@@ -609,22 +659,22 @@ sub instance {
 }
 
 sub solr {
-    my ($i) = @_;
+    my ($self, $i) = @_;
     my $instance;
     if (ref $i) {
         $instance = $i;
         $i = $instance->{'id'};
     }
     else {
-        $instance = instance($i);
+        $instance = $self->instance($i);
     }
     my $idir = $instance->{'_directory'};
-    my $solr = $instance->{'solr'} ||= kvread("$idir/solr.kv");
+    my $solr = $instance->{'solr'} ||= $self->kvread("$idir/solr.kv");
     my $host = $solr->{'host'} ||= 'localhost';
     my $port = $solr->{'port'} ||= 8080;
     my ($solr_dir) = grep { -d } map { "/var/local/solr/$_" } $i, $port;
     $solr->{'local'} = $solr_dir if defined $solr_dir;
-    $solr->{'root'} ||= $solr_root;
+    $solr->{'root'} ||= $self->solr_root;
     $solr->{'uri'} ||= "http://${host}:${port}/solr";
     my $cores = $solr->{'cores'} ||= {};
     foreach (qw(authority biblio reserves website)) {
@@ -634,8 +684,8 @@ sub solr {
 }
 
 sub kvread {
-    my ($f) = @_;
-    my $fh = oread($f);
+    my ($self, $f) = @_;
+    my $fh = $self->oread($f);
     my %kv;
     while (<$fh>) {
         if (/^(\S+)\s+(.*)$/) {
@@ -648,16 +698,17 @@ sub kvread {
         }
         else {
             chomp;
-            fatal "unparseable: config file $f line $.: $_";
+            $self->fatal("unparseable: config file $f line $.: $_");
         }
     }
     return \%kv;
 }
 
 sub kvwrite {
+    my $self = shift;
     my $f = shift;
-    my $kv = kvmake(shift);
-    my $fh = owrite($f);
+    my $kv = $self->kvmake(shift);
+    my $fh = $self->owrite($f);
     foreach my $k (sort keys %$kv) {
         my $v = $kv->{$k};
         printf $fh "%s %s\n", $k, $v if defined $v;
@@ -670,32 +721,51 @@ sub canonpath {
 }
 
 sub orient {
-    my %arg = @_;
+    my ($self, %arg) = @_;
     my $dont_return_instance = delete $arg{'nix'};
     GetOptions(
+        'n|dry-run' => \$self->{'dryrun'},
+        'v|verbose' => \$self->{'verbose'},
         %arg,
-    ) or usage;
+    ) or $self->usage;
+    $self->{'verbose'} = 1 if $self->{'dryrun'};
     return if $dont_return_instance;
-    my $argvi;
+    my $root = $self->root;
+    my ($argvi, $curi);
     if (@ARGV && -e "$root/$ARGV[0]/instance.kv") {
         $argvi = $ARGV[0];
     }
     if (getcwd =~ m{^\Q$root\E/instance/+([^/]+)}) {
         $curi = $1;
     }
-    return instance(shift @ARGV) if $argvi && !$curi;
-    return instance($curi) if $curi && !$argvi;
-    return instance($argvi) if $argvi;
-    # xchdir($root);
+    my $i;
+    if ($argvi && !$curi) {
+        $i = $argvi;
+        shift @ARGV;
+    }
+    elsif ($curi && !$argvi) {
+        $i = $curi;
+    }
+    elsif ($argvi) {
+        $i = $argvi;
+    }
+    else {
+        $self->fatal("can't determine instance");
+    }
+    $self->current_instance($self->instance($i));
 }
 
 sub usage {
-    print STDERR "usage: vfop COMMAND [ARG...]\n";
+    my ($self) = @_;
+    my $prog = $self->program_name;
+    print STDERR "usage: $prog COMMAND [ARG...]\n";
     exit 1;
 }
 
 sub fatal {
-    print STDERR "vfop: ", @_, "\n";
+    my $self = shift;
+    my $prog = $self->program_name;
+    print STDERR $prog, ': ', @_, "\n";
     exit 2;
 }
 
