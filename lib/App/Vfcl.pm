@@ -730,7 +730,7 @@ sub orient {
     return if $dont_return_instance;
     my $root = $self->root;
     my ($argvi, $curi);
-    if (@ARGV && -e "$root/$ARGV[0]/instance.kv") {
+    if (@ARGV && -e "$root/instance/$ARGV[0]/instance.kv") {
         $argvi = $ARGV[0];
     }
     if (getcwd =~ m{^\Q$root\E/instance/+([^/]+)}) {
