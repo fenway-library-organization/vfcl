@@ -4,6 +4,8 @@ use strict;
 use warnings;
 
 use App::Vfcl::Instance;
+use App::Vfcl::Util;
+
 use JSON;
 use MARC::Loop;
 use LWP::UserAgent;
@@ -18,7 +20,9 @@ use Try::Tiny;
 use Getopt::Long
     qw(:config posix_default gnu_compat require_order bundling no_ignore_case);
 
-use vars qw($VERSION);
+use constant util => 'App::Vfcl::Util';
+
+use vars qw($VERSION $AUTOLOAD);
 
 $VERSION = '0.01';
 
@@ -60,9 +64,9 @@ sub counter {
 
 sub run {
     my ($self) = @_;
-    $self->usage if !@ARGV;
+    usage if !@ARGV;
     my $cmd = shift @ARGV;
-    goto &{ $self->can('cmd_'.$cmd) || $self->usage };
+    goto &{ $self->can('cmd_'.$cmd) || usage };
 }
 
 # --- Command handlers
@@ -89,20 +93,20 @@ sub cmd_new {
             $source{'branch'} = $_[1];
         },
     );
-    $self->usage if @ARGV != 1;
+    usage if @ARGV != 1;
     my ($i) = @ARGV;
-    $self->fatal("root doesn't exist: $root")
+    fatal("root doesn't exist: $root")
         if !-d $root;
-    $self->fatal("instance already exists: $i")
+    fatal("instance already exists: $i")
         if -e "$root/instance/$i/instance.kv";
     $solr =~ /^(\[[^\[\]]+\]|[^:]+):([0-9]+)$/
-        or $self->usage;
+        or usage;
     my %solr = ('host' => $1, 'port' => $2);
     if (!defined $descrip) {
         if (-t STDIN && -t STDERR) {
             print STDERR "Instance description: ";
             $descrip = <STDIN>;
-            $self->fatal("cancelled") if !defined $descrip;
+            fatal("cancelled") if !defined $descrip;
             chomp $descrip;
         }
     }
@@ -135,7 +139,7 @@ sub cmd_build {
         $instance->build;
     }
     catch {
-        $self->fatal(split /\n/, $@, 1);
+        fatal(split /\n/, $@, 1);
     }
 }
 
@@ -159,28 +163,28 @@ sub cmd_solr {
 sub cmd_solr_start {
     my ($self) = @_;
     my $instance = $self->orient;
-    $self->usage if @ARGV;
+    usage if @ARGV;
     $self->solr_action($instance, 'start');
 }
 
 sub cmd_solr_stop {
     my ($self) = @_;
     my $instance = $self->orient;
-    $self->usage if @ARGV;
+    usage if @ARGV;
     $self->solr_action($instance, 'stop');
 }
 
 sub cmd_solr_restart {
     my ($self) = @_;
     my $instance = $self->orient;
-    $self->usage if @ARGV;
+    usage if @ARGV;
     $self->solr_action($instance, 'restart');
 }
 
 sub cmd_solr_status {
     my ($self) = @_;
     my $instance = $self->orient;
-    $self->usage if @ARGV;
+    usage if @ARGV;
     my $solr = $self->solr($instance);
     my $status = $self->solr_status($solr);
     if (!$status) {
@@ -200,11 +204,11 @@ sub cmd_import {
     #@ import FILE...
     my ($self) = @_;
     my $instance = $self->orient;
-    $self->usage if !@ARGV;
+    usage if !@ARGV;
     my $solr = $self->solr($instance);
     @ARGV = map {
-        my $path = _canonpath($_);
-        $self->fatal("no such file: $_") if !defined $path;
+        my $path = canonpath($_);
+        fatal("no such file: $_") if !defined $path;
         $path
     } @ARGV;
     print STDERR "Dry run -- no changes will be made\n" if $self->dryrun;
@@ -213,9 +217,9 @@ sub cmd_import {
     my %name;
     foreach my $f (@ARGV) {
         print STDERR $f, "\n" if $self->verbose;
-        $self->fatal("not a MARC file: $f") if $f !~ m{([^/]+\.mrc)(?:\.gz)?$};
+        fatal("not a MARC file: $f") if $f !~ m{([^/]+\.mrc)(?:\.gz)?$};
         my $name = $1;
-        $self->fatal("duplicate file name: $name") if exists $name{$name};
+        fatal("duplicate file name: $name") if exists $name{$name};
         $name{$f} = $name;
         my $fh = $self->oread($f);
         my %num;
@@ -252,44 +256,44 @@ sub cmd_import {
     }
     exit 1 if keys %invalid;
     my $root = $self->root;
-    $self->xchdir($root, 'instance', $instance->{'id'});
-    my $solr_dir = _canonpath($solr->{'local'});
-    $self->fatal("solr instance doesn't exist locally")
+    xchdir($root, 'instance', $instance->{'id'});
+    my $solr_dir = canonpath($solr->{'local'});
+    fatal("solr instance doesn't exist locally")
         if !defined $solr_dir
         || !-d $solr_dir;
     my $solr_dir_here = 'vufind/solr';
-    $self->fatal(getcwd, '/solr does not exist')
+    fatal(getcwd, '/solr does not exist')
         if !-e $solr_dir_here;
-    $solr_dir_here = _canonpath(readlink($solr_dir_here)) if -l $solr_dir_here;
-    $self->fatal("solr not configured correctly: $solr_dir_here is not the same as $solr_dir")
+    $solr_dir_here = canonpath(readlink($solr_dir_here)) if -l $solr_dir_here;
+    fatal("solr not configured correctly: $solr_dir_here is not the same as $solr_dir")
         if $solr_dir_here ne $solr_dir;
     exit 0 if $self->dryrun;
-    $self->xmkdir('records', 'records/importing', 'records/imported', 'records/failed');
+    xmkdir('records', 'records/importing', 'records/imported', 'records/failed');
     my @importing;
     foreach my $f (@ARGV) {
         my $name = $name{$f};
         my $dest = "records/importing";
-        $self->xmove($f, $dest);
+        xmove($f, $dest);
         if ($f =~ /\.gz$/) {
             system('gunzip', "$dest.gz") == 0
-                or $self->fatal("decompression failed: $dest.gz");
+                or fatal("decompression failed: $dest.gz");
         }
-        my $path = _canonpath("$dest/$name");
+        my $path = canonpath("$dest/$name");
         push @importing, $path;
     }
-    $self->xchdir('vufind');
+    xchdir('vufind');
     my $err;
     $self->withenv($self->environment($instance), sub {
         $err = system('./import-marc.sh', @importing);
     });
-    $self->xchdir('..');
+    xchdir('..');
     if ($err) {
         print STDERR "import failed\n";
-        $self->xmove(@importing, 'records/failed');
+        xmove(@importing, 'records/failed');
     }
     else {
         print STDERR "import completed\n";
-        $self->xmove(@importing, 'records/imported');
+        xmove(@importing, 'records/imported');
     }
 }
 
@@ -305,7 +309,7 @@ sub cmd_export {
     my $total = 0;
     my @queries;
     if ($all) {
-        $self->usage if @ARGV;
+        usage if @ARGV;
         $form{'q'} = 'id:*';
         push @queries, { %form };
     }
@@ -335,7 +339,7 @@ sub cmd_export {
             my $req = HTTP::Request->new('GET' => $uri);
             $req->header('Accept' => 'application/json');
             my $res = $ua->request($req);
-            $self->fatal($res->status_line) if !$res->is_success;
+            fatal($res->status_line) if !$res->is_success;
             my $content = $json->decode($res->content);
             if (!defined $remaining) {
                 $remaining = $content->{'response'}{'numFound'};
@@ -359,7 +363,7 @@ sub cmd_empty {
     my $instance = $self->orient(
         'y|yes' => \$yes,
     );
-    $self->usage if @ARGV;
+    usage if @ARGV;
     my $solr = $self->solr($instance);
     my ($host, $port, $cores) = @$solr{qw(host port cores)};
     my $uri = "http://${host}:${port}/solr/$cores->{'biblio'}/update";
@@ -368,7 +372,7 @@ sub cmd_empty {
     if (!$yes) {
         print STDERR 'Are you sure you want to proceed? [yN] ';
         my $ans = <STDIN>;
-        $self->fatal('cancelled') if !defined $ans || $ans !~ /^[Yy]/;
+        fatal('cancelled') if !defined $ans || $ans !~ /^[Yy]/;
     }
     my $t0 = time;
     $uri .= $sfx;
@@ -377,7 +381,7 @@ sub cmd_empty {
     $req->content('<delete><query>*:*</query></delete>');
     my $ua = $self->ua;
     my $res = $ua->request($req);
-    $self->fatal($res->status_line) if !$res->is_success;
+    fatal($res->status_line) if !$res->is_success;
     printf STDERR "Deletion completed in %d second(s)\n", time - $t0;
 }
 
@@ -392,11 +396,11 @@ sub cmd_upgrade {
 
 sub subcmd {
     my ($self) = @_;
-    $self->usage if !@ARGV;
+    usage if !@ARGV;
     my $subcmd = shift @ARGV;
     my @caller = caller 1;
     $caller[3] =~ /(cmd_\w+)$/ or die;
-    goto &{ $self->can($1.'_'.$subcmd) || $self->usage };
+    goto &{ $self->can($1.'_'.$subcmd) || usage };
 }
 
 sub solr_status {
@@ -430,7 +434,7 @@ sub solr_action {
     my $idir = $instance->{'_directory'};
     $self->as_solr_user($instance, sub {
         system("$idir/vufind/solr.sh", $action) == 0
-            or $self->fatal("exec $idir/solr.sh $action: $?");
+            or fatal("exec $idir/solr.sh $action: $?");
     });
 }
 
@@ -440,14 +444,14 @@ sub as_solr_user {
     my $solr = $self->solr($instance);
     my ($host, $port) = @$solr{qw(host port)};
     my $solr_dir = $solr->{'local'};
-    $self->fatal("solr instance for $i doesn't seem to exist locally")
+    fatal("solr instance for $i doesn't seem to exist locally")
         if !defined $solr_dir || !-d $solr_dir;
     my $solr_user = $solr->{'user'} || 'solr';
     my $user = getpwuid($<);
     if ($user ne $solr_user) {
         my $solr_uid = getpwnam($solr_user);
-        $self->fatal("getpwnam: $!") if !defined $solr_uid;
-        setuid($solr_uid) or $self->fatal("setuid $solr_uid: $!");
+        fatal("getpwnam: $!") if !defined $solr_uid;
+        setuid($solr_uid) or fatal("setuid $solr_uid: $!");
     }
     $self->withenv($self->environment($instance), sub { $cmd->($solr) });
 }
@@ -476,30 +480,6 @@ sub withenv {
     $sub->();
 }
 
-sub oread {
-    my ($self, $file) = @_;
-    open my $fh, '<', $file or $self->fatal("open $file for reading: $!");
-    return $fh;
-}
-
-sub owrite {
-    my ($self, $file) = @_;
-    open my $fh, '>', $file or $self->fatal("open $file for writing: $!");
-    return $fh;
-}
-
-sub oreadwrite {
-    my ($self, $file) = @_;
-    open my $fh, '+<', $file or $self->fatal("open $file for reading and writing: $!");
-    return $fh;
-}
-
-sub kvmake {
-    my ($self, $hash) = @_;
-    my %kv = map { $_ => $hash->{$_} } grep { !/^_/ } keys %$hash;
-    return flatten(\%kv);
-}
-
 sub show_status {
     my ($self, $instance) = @_;
     my $solr = $self->solr($instance);
@@ -508,34 +488,6 @@ sub show_status {
     my $ua = $self->ua;
     my $res = $ua->request($req);
     print $res->status_line, "\n";
-}
-
-sub xmkdir {
-    my $self = shift;
-    foreach my $dir (@_) {
-        -d $dir or mkdir $dir or $self->fatal("mkdir $dir: $!");
-    }
-}
-
-sub xmove {
-    my $self = shift;
-    my $d = pop;
-    foreach my $s (@_) {
-        move($s, $d)
-            or $self->fatal("move $s $d: $!");
-    }
-}
-
-sub xrename {
-    my ($self, $s, $d) = @_;
-    rename $s, $d or $self->fatal("rename $s to $d: $!");
-}
-
-sub xchdir {
-    my $self = shift;
-    foreach my $dir (@_) {
-        chdir $dir or $self->fatal("chdir $dir: $!");
-    }
 }
 
 sub update_ini_file {
@@ -598,7 +550,7 @@ sub update_ini_file {
         for (@lines) {
             print $fhout $_ if defined $_;
         }
-        close $fhout or $self->fatal("close $tmpfile: $!");
+        close $fhout or fatal("close $tmpfile: $!");
         $self->replace($file, $tmpfile, $file . '.bak');
     }
     return 0;
@@ -618,30 +570,30 @@ sub replace {
     my ($self, $file, $new, $backup) = @_;
     if (!defined $backup) {
         my $tmp = $self->tmpfile;
-        rename $file, $tmp or $self->fatal("replace $file: can't move it to make way for new contents");
+        rename $file, $tmp or fatal("replace $file: can't move it to make way for new contents");
         if (rename $new, $file) {
             unlink $tmp;
             return;
         }
-        rename $tmp, $file or $self->fatal("replace $file: can't move it back from $tmp");
+        rename $tmp, $file or fatal("replace $file: can't move it back from $tmp");
     }
     if (-e $backup) {
-        unlink $backup or $self->fatal("unlink $backup")
+        unlink $backup or fatal("unlink $backup")
     }
     if (rename $file, $backup) {
         return if rename $new, $file;
         rename $backup, $file
-            or $self->fatal("replace $file: can't restore from $backup: $!");
+            or fatal("replace $file: can't restore from $backup: $!");
     }
     else {
-        $self->fatal("replace $file: can't rename $file to $backup: $!");
+        fatal("replace $file: can't rename $file to $backup: $!");
     }
 }
 
 sub instance {
     my ($self, $i) = @_;
     if (!defined $i) {
-        $i = $self->current_instance or $self->fatal("no instance specified");
+        $i = $self->current_instance or fatal("no instance specified");
     }
     $i =~ s/^[@]//;
     my $root = $self->root;
@@ -682,43 +634,6 @@ sub solr {
     return $solr;
 }
 
-sub kvread {
-    my ($self, $f) = @_;
-    my $fh = $self->oread($f);
-    my %kv;
-    while (<$fh>) {
-        if (/^(\S+)\s+(.*)$/) {
-            my ($k, $v) = ($1, $2);
-            my $hash = \%kv;
-            while ($k =~ s/^([^.]+)\.//) {
-                $hash = $hash->{$1} ||= {};
-            }
-            $hash->{$k} = $v;
-        }
-        else {
-            chomp;
-            $self->fatal("unparseable: config file $f line $.: $_");
-        }
-    }
-    return \%kv;
-}
-
-sub kvwrite {
-    my $self = shift;
-    my $f = shift;
-    my $kv = $self->kvmake(shift);
-    my $fh = $self->owrite($f);
-    foreach my $k (sort keys %$kv) {
-        my $v = $kv->{$k};
-        printf $fh "%s %s\n", $k, $v if defined $v;
-    }
-}
-
-sub canonpath {
-    return if !defined $_[0];
-    return realpath(File::Spec->rel2abs(@_));
-}
-
 sub orient {
     my ($self, %arg) = @_;
     my $dont_return_instance = delete $arg{'nix'};
@@ -726,7 +641,7 @@ sub orient {
         'n|dry-run' => \$self->{'dryrun'},
         'v|verbose' => \$self->{'verbose'},
         %arg,
-    ) or $self->usage;
+    ) or usage;
     $self->{'verbose'} = 1 if $self->{'dryrun'};
     return if $dont_return_instance;
     my $root = $self->root;
@@ -749,23 +664,27 @@ sub orient {
         $i = $argvi;
     }
     else {
-        $self->fatal("can't determine instance");
+        fatal("can't determine instance");
     }
     $self->current_instance($self->instance($i));
 }
 
-sub usage {
-    my ($self) = @_;
-    my $prog = $self->program_name;
-    print STDERR "usage: $prog COMMAND [ARG...]\n";
-    exit 1;
-}
-
-sub fatal {
-    my $self = shift;
-    my $prog = $self->program_name;
-    print STDERR $prog, ': ', @_, "\n";
-    exit 2;
+sub AUTOLOAD {
+    if (@_ && ref($_[0]) && $_[0]->isa(__PACKAGE__)) {
+        shift;
+    }
+    (my $method = $AUTOLOAD) =~ s/.*:://;
+    if (defined(my $sub = App::Vfcl::Util->can($method))) {
+        try {
+            $sub->(@_);
+        }
+        catch {
+            fatal($@);
+        };
+    }
+    else {
+        fatal("internal error: function $method not found");
+    }
 }
 
 1;

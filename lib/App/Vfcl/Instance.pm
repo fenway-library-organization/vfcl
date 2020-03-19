@@ -5,6 +5,7 @@ use base qw(App::Vfcl::Object);
 use App::Vfcl::Util;
 
 sub id { @_ > 1 ? $_[0]{'id'} = $_[1] : $_[0]{'id'} }
+sub app { @_ > 1 ? $_[0]{'app'} = $_[1] : $_[0]{'app'} }
 sub solr { @_ > 1 ? $_[0]{'solr'} = $_[1] : $_[0]{'solr'} }
 sub source { @_ > 1 ? $_[0]{'source'} = $_[1] : $_[0]{'source'} }
 
@@ -14,12 +15,13 @@ sub ua { @_ > 1 ? $_[0]{'_ua'} = $_[1] : $_[0]{'_ua'} }
 sub create {
     my $cls = shift;
     my $self = ref($cls) ? $cls : $cls->new(@_);
+    my $app = $self->app;
     my $id = $self->id;
     foreach ($root, 'instance', $id) {
-        main::xmkdir($_);
-        main::xchdir($_);
+        -d $_ or mkdir $_ or die "mkdir $_: $!";
+        chdir $_ or die "chdir $_: $!";
     }
-    main::kvwrite('instance.kv', $self->as_kv);
+    $app->kvwrite('instance.kv', $self->as_kv);
     #kvwrite('solr.kv', $solr);
     #kvwrite('source.kv', $vufind);
 
@@ -45,7 +47,7 @@ sub build {
         else {
             $vdir = canonpath($vrepo, $idir);
         }
-        App::Vfcl::Util::checkout($vbranch, $vdir);
+        checkout($vbranch, $vdir);
     }
     elsif ($vtype eq 'release') {
         # Download and untar the release (as needed)
@@ -68,8 +70,8 @@ sub build {
         }
         if (!-e $vdir) {
             my $uri = $vufind->{'uri'};
-            App::Vfcl::Util::download($self->ua, $uri, $file) if !-e $file;
-            App::Vfcl::Util::untar($file, $dir);
+            download($self->ua, $uri, $file) if !-e $file;
+            untar($file, $dir);
         }
     }
     else {
