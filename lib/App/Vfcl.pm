@@ -133,8 +133,8 @@ sub cmd_status {
 sub cmd_build {
     #@ build INSTANCE
     my ($self) = @_;
-    my $instance = $self->orient;
     try {
+        my $instance = $self->orient;
         $instance->build;
     }
     catch {
@@ -668,22 +668,22 @@ sub orient {
     $self->current_instance($self->instance($i));
 }
 
-sub AUTOLOAD {
-    if (@_ && ref($_[0]) && $_[0]->isa(__PACKAGE__)) {
-        shift;
-    }
-    (my $method = $AUTOLOAD) =~ s/.*:://;
-    if (defined(my $sub = App::Vfcl::Util->can($method))) {
-        try {
-            $sub->(@_);
-        }
-        catch {
-            fatal($@);
-        };
-    }
-    else {
-        fatal("internal error: function $method not found");
-    }
-}
+### sub AUTOLOAD {
+###     if (@_ && ref($_[0]) && $_[0]->isa(__PACKAGE__)) {
+###         shift;
+###     }
+###     (my $method = $AUTOLOAD) =~ s/.*:://;
+###     if (defined(my $sub = App::Vfcl::Util->can($method))) {
+###         try {
+###             $sub->(@_);
+###         }
+###         catch {
+###             fatal($@);
+###         };
+###     }
+###     else {
+###         fatal("internal error: function $method not found");
+###     }
+### }
 
 1;
