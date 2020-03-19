@@ -220,7 +220,7 @@ sub cmd_import {
         my $name = $1;
         fatal("duplicate file name: $name") if exists $name{$name};
         $name{$f} = $name;
-        my $fh = $self->oread($f);
+        my $fh = oread($f);
         my %num;
         while (1) {
             my $marc;
@@ -491,7 +491,7 @@ sub show_status {
 
 sub update_ini_file {
     my ($self, $file, $section, $sub) = @_;
-    my $fhin = $self->oread($file);
+    my $fhin = oread($file);
     my @lines = <$fhin>;
     my $n = 0;
     my $insection = '';
@@ -598,7 +598,7 @@ sub instance {
     my $root = $self->root;
     my $ua = $self->ua;
     my $json = $self->json;
-    my $instance = $self->kvread("$root/instance/$i/instance.kv");
+    my $instance = kvread("$root/instance/$i/instance.kv");
     return App::Vfcl::Instance->new(
         'id' => $i,
         %$instance,
@@ -619,7 +619,7 @@ sub solr {
         $instance = $self->instance($i);
     }
     my $idir = $instance->{'_directory'};
-    my $solr = $instance->{'solr'} ||= $self->kvread("$idir/solr.kv");
+    my $solr = $instance->{'solr'} ||= kvread("$idir/solr.kv");
     my $host = $solr->{'host'} ||= 'localhost';
     my $port = $solr->{'port'} ||= 8080;
     my ($solr_dir) = grep { -d } map { "/var/local/solr/$_" } $i, $port;
