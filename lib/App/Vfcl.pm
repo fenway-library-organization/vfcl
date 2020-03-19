@@ -23,7 +23,6 @@ use Getopt::Long
 use constant util => 'App::Vfcl::Util';
 
 use vars qw($VERSION $AUTOLOAD);
-
 $VERSION = '0.01';
 
 # --- Methods
@@ -64,9 +63,9 @@ sub counter {
 
 sub run {
     my ($self) = @_;
-    usage if !@ARGV;
+    usage() if !@ARGV;
     my $cmd = shift @ARGV;
-    goto &{ $self->can('cmd_'.$cmd) || usage };
+    goto &{ $self->can('cmd_'.$cmd) || usage() };
 }
 
 # --- Command handlers
@@ -93,14 +92,14 @@ sub cmd_new {
             $source{'branch'} = $_[1];
         },
     );
-    usage if @ARGV != 1;
+    usage() if @ARGV != 1;
     my ($i) = @ARGV;
     fatal("root doesn't exist: $root")
         if !-d $root;
     fatal("instance already exists: $i")
         if -e "$root/instance/$i/instance.kv";
     $solr =~ /^(\[[^\[\]]+\]|[^:]+):([0-9]+)$/
-        or usage;
+        or usage();
     my %solr = ('host' => $1, 'port' => $2);
     if (!defined $descrip) {
         if (-t STDIN && -t STDERR) {
@@ -140,7 +139,7 @@ sub cmd_build {
     }
     catch {
         fatal(split /\n/, $@, 1);
-    }
+    };
 }
 
 sub cmd_cache {
@@ -163,28 +162,28 @@ sub cmd_solr {
 sub cmd_solr_start {
     my ($self) = @_;
     my $instance = $self->orient;
-    usage if @ARGV;
+    usage() if @ARGV;
     $self->solr_action($instance, 'start');
 }
 
 sub cmd_solr_stop {
     my ($self) = @_;
     my $instance = $self->orient;
-    usage if @ARGV;
+    usage() if @ARGV;
     $self->solr_action($instance, 'stop');
 }
 
 sub cmd_solr_restart {
     my ($self) = @_;
     my $instance = $self->orient;
-    usage if @ARGV;
+    usage() if @ARGV;
     $self->solr_action($instance, 'restart');
 }
 
 sub cmd_solr_status {
     my ($self) = @_;
     my $instance = $self->orient;
-    usage if @ARGV;
+    usage() if @ARGV;
     my $solr = $self->solr($instance);
     my $status = $self->solr_status($solr);
     if (!$status) {
@@ -204,7 +203,7 @@ sub cmd_import {
     #@ import FILE...
     my ($self) = @_;
     my $instance = $self->orient;
-    usage if !@ARGV;
+    usage() if !@ARGV;
     my $solr = $self->solr($instance);
     @ARGV = map {
         my $path = canonpath($_);
@@ -309,7 +308,7 @@ sub cmd_export {
     my $total = 0;
     my @queries;
     if ($all) {
-        usage if @ARGV;
+        usage() if @ARGV;
         $form{'q'} = 'id:*';
         push @queries, { %form };
     }
@@ -363,7 +362,7 @@ sub cmd_empty {
     my $instance = $self->orient(
         'y|yes' => \$yes,
     );
-    usage if @ARGV;
+    usage() if @ARGV;
     my $solr = $self->solr($instance);
     my ($host, $port, $cores) = @$solr{qw(host port cores)};
     my $uri = "http://${host}:${port}/solr/$cores->{'biblio'}/update";
@@ -396,11 +395,11 @@ sub cmd_upgrade {
 
 sub subcmd {
     my ($self) = @_;
-    usage if !@ARGV;
+    usage() if !@ARGV;
     my $subcmd = shift @ARGV;
     my @caller = caller 1;
     $caller[3] =~ /(cmd_\w+)$/ or die;
-    goto &{ $self->can($1.'_'.$subcmd) || usage };
+    goto &{ $self->can($1.'_'.$subcmd) || usage() };
 }
 
 sub solr_status {
@@ -641,7 +640,7 @@ sub orient {
         'n|dry-run' => \$self->{'dryrun'},
         'v|verbose' => \$self->{'verbose'},
         %arg,
-    ) or usage;
+    ) or usage();
     $self->{'verbose'} = 1 if $self->{'dryrun'};
     return if $dont_return_instance;
     my $root = $self->root;

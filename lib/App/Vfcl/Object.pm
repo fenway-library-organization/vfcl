@@ -1,5 +1,8 @@
 package App::Vfcl::Object;
 
+use strict;
+use warnings;
+
 sub new {
     my $cls = shift;
     bless { @_ }, $cls;

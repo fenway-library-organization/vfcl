@@ -1,5 +1,8 @@
 package App::Vfcl::Instance;
 
+use strict;
+use warnings;
+
 use base qw(App::Vfcl::Object);
 
 use App::Vfcl::Util;
@@ -15,8 +18,9 @@ sub ua { @_ > 1 ? $_[0]{'_ua'} = $_[1] : $_[0]{'_ua'} }
 sub create {
     my $cls = shift;
     my $self = ref($cls) ? $cls : $cls->new(@_);
-    my $app = $self->app;
     my $id = $self->id;
+    my $app = $self->app;
+    my $root = $app->root;
     foreach ($root, 'instance', $id) {
         -d $_ or mkdir $_ or die "mkdir $_: $!";
         chdir $_ or die "chdir $_: $!";
@@ -58,34 +62,35 @@ sub build {
                 ($vdir, $extension) = ($1, $2);
             }
             else {
-                ($vdir, $file) = ($file, $file . $extension);
+                ($vdir, $vfile) = ($vfile, $vfile . $extension);
             }
         }
-        elsif (defined $version) {
-            $vdir = "$idir/release/vufind-$version";
-            $vfile = $dir . $extension;
+        elsif (defined $vversion) {
+            $vdir = "$idir/release/vufind-$vversion";
+            $vfile = $vdir . $extension;
         }
         else {
             die "unsufficient configuration to determine VuFind source";
         }
         if (!-e $vdir) {
             my $uri = $vufind->{'uri'};
-            download($self->ua, $uri, $file) if !-e $file;
-            untar($file, $dir);
+            download($self->ua, $uri, $vfile) if !-e $vfile;
+            untar($vfile, $vdir);
         }
     }
     else {
-        die "unknown instance source type: $type";
+        die "unknown instance source type: $vtype";
     }
     # Copy files, etc.
-    $self->build_from($dir);
+    $self->build_from($vdir);
 }
 
 sub build_from {
     my ($self, $dir) = @_;
     my $idir = $self->directory;
+    my $app = $self->app;
     my @cmd = qw(rsync -av --exclude=/local);
-    push @cmd, qw(--dry-run) if $dryrun;
+    push @cmd, qw(--dry-run) if $app->dryrun;
     system(@cmd, "$dir/", "$idir/vufind/") == 0
         or die "rsync failed";
     1;
