@@ -61,6 +61,11 @@ sub counter {
     return $_[0]{'counter'} = $_[1];
 }
 
+sub file {
+    my ($self, $f) = @_;
+    return canonpath($f, $self->root);
+}
+
 sub run {
     my ($self) = @_;
     usage() if !@ARGV;
@@ -97,7 +102,7 @@ sub cmd_new {
     fatal("root doesn't exist: $root")
         if !-d $root;
     fatal("instance already exists: $i")
-        if -e "$root/instance/$i/instance.kv";
+        if -e "$root/instance/$i/instance.yml";
     $solr =~ /^(\[[^\[\]]+\]|[^:]+):([0-9]+)$/
         or usage();
     my %solr = ('host' => $1, 'port' => $2);
@@ -138,7 +143,7 @@ sub cmd_build {
         $instance->build;
     }
     catch {
-        fatal(split /\n/, $@, 1);
+        fatal(split /\n/, $_, 1);
     };
 }
 
@@ -184,7 +189,7 @@ sub cmd_solr_status {
     my ($self) = @_;
     my $instance = $self->orient;
     usage() if @ARGV;
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     my $status = $self->solr_status($solr);
     if (!$status) {
         print STDERR "solr instance is not running: $solr->{'uri'}\n";
@@ -204,7 +209,7 @@ sub cmd_import {
     my ($self) = @_;
     my $instance = $self->orient;
     usage() if !@ARGV;
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     @ARGV = map {
         my $path = canonpath($_);
         fatal("no such file: $_") if !defined $path;
@@ -325,7 +330,7 @@ sub cmd_export {
             $form{'start'} += @ids;
         }
     }
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     my $uri = $solr->{'uri'};
     my $bibcore = $solr->{'cores'}{'biblio'};
     my $ua = $self->ua;
@@ -363,7 +368,7 @@ sub cmd_empty {
         'y|yes' => \$yes,
     );
     usage() if @ARGV;
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     my ($host, $port, $cores) = @$solr{qw(host port cores)};
     my $uri = "http://${host}:${port}/solr/$cores->{'biblio'}/update";
     my $sfx = "?commit=true";
@@ -440,7 +445,7 @@ sub solr_action {
 sub as_solr_user {
     my ($self, $instance, $cmd) = @_;
     my $i = $instance->{'id'};
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     my ($host, $port) = @$solr{qw(host port)};
     my $solr_dir = $solr->{'local'};
     fatal("solr instance for $i doesn't seem to exist locally")
@@ -458,7 +463,7 @@ sub as_solr_user {
 sub environment {
     my ($self, $instance, $sub) = @_;
     my $vdir = $instance->{'_directory'} . '/vufind';
-    my $solr_dir = $self->solr($instance)->{'local'};
+    my $solr_dir = $instance->solr->{'local'};
     my %solr;
     %solr = (
         'SOLR_HOME' => "$solr_dir/vufind",
@@ -481,7 +486,7 @@ sub withenv {
 
 sub show_status {
     my ($self, $instance) = @_;
-    my $solr = $self->solr($instance);
+    my $solr = $instance->solr;
     my $uri = $solr->{'uri'};
     my $req = HTTP::Request->new('GET' => $uri);
     my $ua = $self->ua;
@@ -598,13 +603,11 @@ sub instance {
     my $root = $self->root;
     my $ua = $self->ua;
     my $json = $self->json;
-    my $instance = kvread("$root/instance/$i/instance.kv");
     return App::Vfcl::Instance->new(
         'id' => $i,
-        %$instance,
-        '_ua' => $ua,
-        '_json' => $json,
-        '_directory' => "$root/instance/$i",
+        'app' => $self,
+        'ua' => $ua,
+        'root' => "$root/instance/$i",
     );
 }
 
@@ -618,19 +621,7 @@ sub solr {
     else {
         $instance = $self->instance($i);
     }
-    my $idir = $instance->{'_directory'};
-    my $solr = $instance->{'solr'} ||= kvread("$idir/solr.kv");
-    my $host = $solr->{'host'} ||= 'localhost';
-    my $port = $solr->{'port'} ||= 8080;
-    my ($solr_dir) = grep { -d } map { "/var/local/solr/$_" } $i, $port;
-    $solr->{'local'} = $solr_dir if defined $solr_dir;
-    $solr->{'root'} ||= $self->solr_root;
-    $solr->{'uri'} ||= "http://${host}:${port}/solr";
-    my $cores = $solr->{'cores'} ||= {};
-    foreach (qw(authority biblio reserves website)) {
-        $cores->{$_} ||= $_;
-    }
-    return $solr;
+    return $instance->solr;
 }
 
 sub orient {
@@ -645,7 +636,7 @@ sub orient {
     return if $dont_return_instance;
     my $root = $self->root;
     my ($argvi, $curi);
-    if (@ARGV && -e "$root/instance/$ARGV[0]/instance.kv") {
+    if (@ARGV && -e "$root/instance/$ARGV[0]/instance.yml") {
         $argvi = $ARGV[0];
     }
     if (getcwd =~ m{^\Q$root\E/instance/+([^/]+)}) {
