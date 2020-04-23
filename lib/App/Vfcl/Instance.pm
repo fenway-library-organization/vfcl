@@ -75,6 +75,7 @@ sub build {
     my $name = "vufind.$t0.$$";
     my $broot = $self->path('build');
     my $bdir = $self->path("build/$name");
+    $arg{'dry_run'} ||= $self->app->dryrun;
     if (!$arg{'dry_run'}) {
         xmkdir($broot, $bdir);
     }
